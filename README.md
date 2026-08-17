@@ -2,6 +2,10 @@
 
 [English](README.en.md) | 中文
 
+
+![screen](docs/imgs/screen_shot_zh.png)
+![screen](docs/imgs/screen_shot_config.png)
+
 DeepSeek Harness 的 **Ultra Slash** 插件：在会话输入框的 `/` 菜单里单独一组「插件命令」，和 DSH 自带命令分开。
 
 内置四条：
@@ -92,20 +96,47 @@ DeepSeek Harness 的 **Ultra Slash** 插件：在会话输入框的 `/` 菜单�
 
 ## 安装
 
-先有可用的 `dsh`（Web profile），然后：
+### 前置条件
+
+已安装 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，并且能够启动 `dsh web`。
+
+### 从 npm 安装
+
+1. 安装插件（必须带版本号，不要省略 `@0.2.0`）：
 
 ```sh
-dsh plugin --profile web add deepseek-harness-ultra-slash
+dsh plugin --profile web add deepseek-harness-ultra-slash@0.2.0
 ```
+
+`dsh plugin add` 底层是 pnpm。pnpm 11 默认要等一个版本**发布满 24 小时**才会把它当成 `latest`。只写 `deepseek-harness-ultra-slash`、不带 `@版本号` 时，可能静默装上旧版本，而且命令仍然成功退出。写上 `@0.2.0` 才会明确要这一版。
+
+若指定版本后仍提示太新、装不上，在 `~/.dsh/profiles/web/pnpm-workspace.yaml` 加上下面两行，再执行一次安装命令：
+
+```yaml
+minimumReleaseAgeExclude:
+  - deepseek-harness-ultra-slash
+```
+
+2. 重启 `dsh web`。
 
 如果以前装过旧包名 `dsh-steer`，请先卸掉再装新名字，避免两套同时加载：
 
 ```sh
 dsh plugin --profile web remove dsh-steer
-dsh plugin --profile web add deepseek-harness-ultra-slash
+dsh plugin --profile web add deepseek-harness-ultra-slash@0.2.0
 ```
 
-本地开发（本仓库）：
+### 应用市场 / GitHub
+
+市场分配的安装命令装的是 GitHub 仓库，不是 npm 包：
+
+```sh
+dsh plugin --profile web add github:loadingvx/deepseeh-harness-ultra-slash
+```
+
+默认分支里必须已经有构建好的 `lib/index.js` 和 `lib/client.js`。只提交源码会装不上：pnpm 默认拦截 git 包的 `prepare` 构建脚本，用户会看到 `allowBuilds` 报错。装完后同样重启 `dsh web`。
+
+### 本地开发（本仓库）
 
 ```sh
 bash devops/setup.sh    # 安装 mise 管理的 Node / pnpm 和依赖

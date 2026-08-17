@@ -4,6 +4,9 @@
 
 **Ultra Slash** for DeepSeek Harness: a separate `/` menu group for this plugin's commands.
 
+![screen](docs/imgs/screen_shot_zh.png)
+![screen](docs/imgs/screen_shot_config.png)
+
 Built-in commands:
 
 | Command | What it does | Interrupts the turn? |
@@ -68,18 +71,47 @@ The `/steer` line stays in the human command plane. Only the suffix is queued as
 
 ## Install
 
+### Prerequisites
+
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) is installed, and `dsh web` can be started.
+
+### From npm
+
+1. Install the plugin (pin the version; do not omit `@0.2.0`):
+
 ```sh
-dsh plugin --profile web add deepseek-harness-ultra-slash
+dsh plugin --profile web add deepseek-harness-ultra-slash@0.2.0
 ```
+
+`dsh plugin add` is implemented with pnpm. pnpm 11 waits **24 hours** after a version is published before it will pick it as `latest`. A bare `deepseek-harness-ultra-slash` (no `@version`) can therefore install an older release and still exit 0. Pinning `@0.2.0` requests that release explicitly.
+
+If a pinned install is still refused as too new, add this to `~/.dsh/profiles/web/pnpm-workspace.yaml` and run the command again:
+
+```yaml
+minimumReleaseAgeExclude:
+  - deepseek-harness-ultra-slash
+```
+
+2. Restart `dsh web`.
 
 If the old package `dsh-steer` is still installed, remove it first so both copies are not loaded:
 
 ```sh
 dsh plugin --profile web remove dsh-steer
-dsh plugin --profile web add deepseek-harness-ultra-slash
+dsh plugin --profile web add deepseek-harness-ultra-slash@0.2.0
 ```
 
-Local development:
+### App market / GitHub
+
+The market command installs the GitHub tree, not the npm tarball:
+
+```sh
+dsh plugin --profile web add github:loadingvx/deepseeh-harness-ultra-slash
+```
+
+This only works when the default branch already contains built `lib/index.js` and `lib/client.js`. A source-only commit will fail: pnpm blocks the git-hosted `prepare` script unless the user adds `allowBuilds`. After install, restart `dsh web`.
+
+### Local development
 
 ```sh
 bash devops/setup.sh
