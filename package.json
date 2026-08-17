@@ -1,0 +1,71 @@
+{
+  "name": "deepseek-harness-ultra-slash",
+  "version": "0.2.0",
+  "description": "DeepSeek Harness Ultra Slash：独立斜杠命令分组；/steer /new /skill /docs，以及可配置的自定义 /steer 子命令",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-input-trigger",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "prepublishOnly": "tsdown",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "bash devops/dev.sh",
+    "release": "bash devops/release.sh"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=0.1.0-rc.5",
+    "react": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@types/react": "~18.3.1",
+    "lightningcss": "^1.32.0",
+    "react": "^18.2.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.8"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "ultra-slash",
+    "steer",
+    "slash-command"
+  ],
+  "license": "MIT"
+}

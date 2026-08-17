@@ -1,0 +1,4 @@
+# 把 Ultra Slash 插件挂进当前 profile。加载顺序由 commands 服务是否就绪决定，不靠这一行的位置。
+- insert:
+    - id: deepseek-harness-ultra-slash
+      name: deepseek-harness-ultra-slash

@@ -1,0 +1,12 @@
+deepseek-harness
+node_modules
+lib/*
+!lib/index.js
+!lib/client.js
+.pnpm-store
+*.tgz
+coverage
+.DS_Store
+.idea
+.vscode
+*.log
