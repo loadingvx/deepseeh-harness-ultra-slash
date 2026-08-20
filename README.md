@@ -25,10 +25,10 @@ DeepSeek Harness 的 **Ultra Slash** 插件：在会话输入框的 `/` 菜单�
 ### 从 npm 安装
 
 ```sh
-dsh plugin --profile web add deepseek-harness-ultra-slash@0.2.0
+dsh plugin --profile web add deepseek-harness-ultra-slash@0.2.1
 ```
 
-`@0.2.0` 不能省略：pnpm 对刚发布的版本有 24 小时保护，不带版本号可能装到旧版。
+`@0.2.1` 不能省略：pnpm 对刚发布的版本有 24 小时保护，不带版本号可能装到旧版。
 
 ### 从 GitHub 安装
 

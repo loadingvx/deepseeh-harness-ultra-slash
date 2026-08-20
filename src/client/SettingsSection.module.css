@@ -200,6 +200,63 @@
   line-height: 1.5;
 }
 
+/* Builtin default-prompt editors: one compact row per command. */
+.defaultsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.defaultsRow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--dsw-alias-border-l2, #e5e7eb);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-layer-3, #f7f8fa);
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+/* Merged builtin row: tag chip sits next to the command name. */
+.defaultsHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.defaultsHead .kind {
+  flex: none;
+}
+
+.defaultsLabel {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.defaultsTextarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l2, #e5e7eb);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 8px;
+  min-height: 44px;
+  resize: vertical;
+}
+
+.defaultsTextarea:focus {
+  outline: 2px solid var(--dsw-alias-brand-primary, #4f6ef7);
+  outline-offset: 1px;
+}
+
 .input:focus,
 .textarea:focus {
   outline: 2px solid var(--dsw-alias-brand-primary, #4f6ef7);

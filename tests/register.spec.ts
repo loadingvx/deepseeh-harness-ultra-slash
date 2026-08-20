@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { composeAliasText } from '../src/catalog.ts'
 import { SKILL_COMMAND_NAME } from '../src/command.ts'
 import { translate } from '../src/locales.ts'
-import { applyCommands, createCommandHub, loadHubFromDisk } from '../src/register.ts'
+import { applyCommands, createCommandHub, loadHubFromDisk, withConflictSink, type YieldedConflict } from '../src/register.ts'
 import type { SteerAgent, SteerCommandDefinition, SteerInvocation } from '../src/types.ts'
 
 function agent(status: SteerAgent['status'], steer: SteerAgent['steer'] = vi.fn()): SteerAgent {
@@ -88,6 +88,83 @@ describe('applyCommands', () => {
   })
 })
 
+describe('builtin default prompts', () => {
+  it('uses the configured skill default instead of the shipped payload', () => {
+    const registered: SteerCommandDefinition[] = []
+    applyCommands(mockCtx(registered), () => ({ skill: '自定义 skill 文案' }))
+    const skill = registered.find((row) => row.name === SKILL_COMMAND_NAME)
+    const { invocation: call, steer } = invocation('')
+    skill?.handler(call)
+    expect(vi.mocked(steer).mock.calls[0]?.[0].content[0]?.text).toBe('自定义 skill 文案')
+  })
+
+  it('appends extra text after a configured docs default', () => {
+    const registered: SteerCommandDefinition[] = []
+    applyCommands(mockCtx(registered), () => ({ docs: '自定义 docs 文案' }))
+    const docs = registered.find((row) => row.name === 'docs')
+    const { invocation: call, steer } = invocation(' 重点写复现步骤 ')
+    docs?.handler(call)
+    expect(vi.mocked(steer).mock.calls[0]?.[0].content[0]?.text).toBe('自定义 docs 文案' + String.fromCharCode(10) + '重点写复现步骤')
+  })
+
+  it('falls back to the shipped payload when a default is empty', () => {
+    const registered: SteerCommandDefinition[] = []
+    applyCommands(mockCtx(registered), () => ({ skill: '' }))
+    const skill = registered.find((row) => row.name === SKILL_COMMAND_NAME)
+    const { invocation: call, steer } = invocation('')
+    skill?.handler(call)
+    expect(vi.mocked(steer).mock.calls[0]?.[0].content[0]?.text).toBe(translate('zh', 'skill.payload'))
+  })
+})
+
+
+describe('conflict yield (workbench / leftover install already owns resources)', () => {
+  it('skips already-registered builtins and reports each yield', () => {
+    const registered: SteerCommandDefinition[] = [
+      // Workbench (or a leftover install) already owns the four builtins.
+      { name: 'steer', description: 'x', handler: () => ({ kind: 'success' as const }) },
+      { name: 'new', description: 'x', handler: () => ({ kind: 'success' as const }) },
+      { name: 'skill', description: 'x', handler: () => ({ kind: 'success' as const }) },
+      { name: 'docs', description: 'x', handler: () => ({ kind: 'success' as const }) },
+    ]
+    const conflicts: YieldedConflict[] = []
+    const restore = withConflictSink((conflict) => conflicts.push(conflict))
+    try {
+      expect(() => applyCommands(mockCtx(registered))).not.toThrow()
+    } finally {
+      restore()
+    }
+    // No duplicate is registered (the owner keeps theirs) and every
+    // contested command is reported.
+    expect(registered.length).toBe(4)
+    expect(conflicts.map((c) => (c.resource === 'command' ? c.name : c.path)).sort())
+      .toEqual(['docs', 'new', 'skill', 'steer'])
+  })
+
+  it('reports a custom command conflict when the hub loads a shared store', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ultra-slash-yield-'))
+    const path = join(dir, 'commands.json')
+    const conflicts: YieldedConflict[] = []
+    const restore = withConflictSink((conflict) => conflicts.push(conflict))
+    try {
+      // Workbench's hub already registered the shared custom command.
+      const registered: SteerCommandDefinition[] = [
+        { name: 'review', description: 'x', handler: () => ({ kind: 'success' as const }) },
+      ]
+      const ctx = mockCtx(registered)
+      const hub = createCommandHub(ctx, path)
+      const result = await hub.saveCustom([{ name: 'review', steerText: '只看 diff' }])
+      expect(result.ok).toBe(true)
+      expect(conflicts.some((c) => c.resource === 'command' && c.name === 'review')).toBe(true)
+      // The owner's registration is untouched; the store is still written so
+      // a fresh boot (without the owner) keeps the command.
+      expect(registered.some((row) => row.name === 'review')).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+})
+
 describe('custom command hub', () => {
   it('registers, replaces, and persists aliases', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ultra-slash-hub-'))
@@ -125,5 +202,38 @@ describe('custom command hub', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.message).toContain('/steer')
     expect(hub.listCustom()).toEqual([])
+  })
+
+  it('persists and reloads builtin defaults without touching custom commands', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ultra-slash-hub-'))
+    const path = join(dir, 'commands.json')
+    const registered: SteerCommandDefinition[] = []
+    const ctx = mockCtx(registered)
+    const hub = createCommandHub(ctx, path)
+    const saved = await hub.saveDefaults({ new: '先总结改动', skill: ' 存成 skill ' })
+    expect(saved.ok).toBe(true)
+    if (saved.ok) expect(saved.defaults).toEqual({ new: '先总结改动', skill: '存成 skill' })
+    expect(hub.defaults()).toEqual({ new: '先总结改动', skill: '存成 skill' })
+
+    const reloaded = mockCtx()
+    const hub2 = createCommandHub(reloaded, path)
+    const loaded = await loadHubFromDisk(hub2, path)
+    expect(loaded.ok).toBe(true)
+    expect(hub2.defaults()).toEqual({ new: '先总结改动', skill: '存成 skill' })
+  })
+
+  it('keeps defaults when custom commands are saved', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ultra-slash-hub-'))
+    const path = join(dir, 'commands.json')
+    const registered: SteerCommandDefinition[] = []
+    const ctx = mockCtx(registered)
+    const hub = createCommandHub(ctx, path)
+    await hub.saveDefaults({ docs: '写文档' })
+    await hub.saveCustom([{ name: 'review', steerText: '只看 diff' }])
+    const reloaded = mockCtx()
+    const hub2 = createCommandHub(reloaded, path)
+    await loadHubFromDisk(hub2, path)
+    expect(hub2.defaults()).toEqual({ docs: '写文档' })
+    expect(hub2.listCustom().map((row) => row.name)).toEqual(['review'])
   })
 })

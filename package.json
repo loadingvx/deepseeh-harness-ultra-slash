@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-ultra-slash",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DeepSeek Harness Ultra Slash：独立斜杠命令分组；/steer /new /skill /docs，以及可配置的自定义 /steer 子命令",
   "type": "module",
   "main": "lib/index.js",

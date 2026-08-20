@@ -210,3 +210,53 @@ describe('slash.menu group title', () => {
     restore()
   })
 })
+
+describe('conflict yield on the client half', () => {
+  it('slashSourceTaken detects a pre-registered /ultra-slash source', () => {
+    const service: SlashTriggerService = {
+      live: {
+        sources: [
+          { trigger: '/', name: 'ultra-slash', candidates: async () => [], onPick: vi.fn() },
+        ],
+      },
+      registerSource: vi.fn(() => () => {}),
+    }
+    expect(client.slashSourceTaken(service)).toBe(true)
+    const empty: SlashTriggerService = { live: { sources: [] }, registerSource: vi.fn(() => () => {}) }
+    expect(client.slashSourceTaken(empty)).toBe(false)
+  })
+
+  it('apply() stands down when the /ultra-slash source is already owned', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const registerSource = vi.fn(() => () => {})
+    const service: SlashTriggerService = {
+      live: {
+        sources: [
+          { trigger: '/', name: 'ultra-slash', candidates: async () => [], onPick: vi.fn() },
+        ],
+      },
+      registerSource,
+    }
+    const effects: Array<() => unknown> = []
+    const ctx = {
+      effect(fn: () => unknown) {
+        effects.push(fn)
+        return () => {}
+      },
+      get: () => undefined,
+      inputTriggers: service,
+      locale: {
+        dicts: new Map(),
+        register: vi.fn(() => () => {}),
+      },
+      slots: undefined,
+    }
+    client.apply(ctx as never)
+    // Run the effects so the source effect actually executes.
+    for (const fn of effects) fn()
+    expect(registerSource).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('stands down'))
+    warn.mockRestore()
+  })
+})
+

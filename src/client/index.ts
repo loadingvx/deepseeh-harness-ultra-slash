@@ -1,6 +1,13 @@
 /**
  * Browser half: ultra-slash `/` group, `/new` session switch, and the
  * settings page for custom `/steer` aliases.
+ *
+ * Conflicts with a leftover ultra-slash install or the workbench's embedded
+ * copy are handled by yielding: if the `/ultra-slash` slash source or the
+ * locale namespace is already registered, this half stands down for the
+ * contested resource and lets the owner serve it, so the web app always
+ * mounts. The `/new` bridge is only installed when this half actually owns
+ * the slash source — a double bridge would start two sessions per `/new`.
  */
 import { createElement as h } from 'react'
 import { PLUGIN_NAME } from '../command.ts'
@@ -13,12 +20,19 @@ import {
   PLUGIN_SLASH_NAMES,
   PLUGIN_SLASH_ORDER,
   PLUGIN_SLASH_SOURCE,
+  pluginLexicon,
   pluginSlashCandidates,
   type LocaleRegistry,
+  type SlashSource,
   type SlashTriggerService,
 } from '../slash-menu.ts'
 import { createCatalogCache } from './catalog-api.ts'
-import { installNewSessionBridge, startNewSession } from './new-session.ts'
+import {
+  installNewSessionBridge,
+  newSlashMatchEnter,
+  newSlashMatchSpace,
+  startNewSession,
+} from './new-session.ts'
 import { SettingsSection } from './SettingsSection.tsx'
 
 const DIVIDER_STYLE_ID = `${PLUGIN_NAME}-divider`
@@ -106,6 +120,59 @@ function syncHiddenNames(
   for (const name of customNames) hidden.add(name)
 }
 
+/**
+ * Whether the `/ultra-slash` slash source is already owned (a leftover
+ * ultra-slash install or the workbench's embedded copy registered first).
+ */
+export function slashSourceTaken(service: SlashTriggerService): boolean {
+  return (service.live?.sources ?? []).some(
+    (source) => source.trigger === '/' && source.name === PLUGIN_SLASH_SOURCE,
+  )
+}
+
+/**
+ * Register the plugin's `/` source, standing down when the group name is
+ * already owned. Returns the disposer plus whether this half actually owns
+ * the source (false on a yield).
+ */
+function registerSourceTolerant(
+  service: SlashTriggerService,
+  source: SlashSource,
+): { dispose: () => void; owned: boolean } {
+  if (slashSourceTaken(service)) {
+    console.warn(
+      '[deepseek-harness-ultra-slash] slash source "/' + PLUGIN_SLASH_SOURCE + '" is already registered '
+      + '(a leftover ultra-slash install, or dsh-workbench-plugin\'s embedded copy); this plugin stands down for it. '
+      + 'No data is touched; the owner keeps serving the group.',
+    )
+    return { dispose: () => {}, owned: false }
+  }
+  const dispose = service.registerSource(source)
+  return { dispose, owned: true }
+}
+
+/**
+ * Register the locale namespace, merging into an existing registration when
+ * the namespace is already owned (never throw, never replace the owner).
+ */
+function registerLocaleTolerant(locale: LocaleFace): (() => void) | undefined {
+  try {
+    const undo = locale.register(LOCALE_NS, { zh, en })
+    return typeof undo === 'function' ? undo as () => void : undefined
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!/already has locale/.test(message)) throw error
+    // The namespace exists; merge our dictionaries so lookups still work,
+    // then do nothing on dispose (we never owned the namespace).
+    const table = locale.dicts?.get(LOCALE_NS)
+    const zhDict = table?.get('zh')
+    const enDict = table?.get('en')
+    if (zhDict !== undefined) Object.assign(zhDict, zh)
+    if (enDict !== undefined) Object.assign(enDict, en)
+    return () => {}
+  }
+}
+
 /** Register the ultra-slash group, /new bridge, and settings section. */
 export function apply(ctx: UltraSlashClientContext): void {
   const inputTriggers = resolveTriggerService(ctx)
@@ -125,7 +192,7 @@ export function apply(ctx: UltraSlashClientContext): void {
     if (locale === undefined) return () => {}
     const undoTitle = patchSlashMenuGroupTitle(locale)
     const undoDicts = typeof locale.register === 'function'
-      ? locale.register(LOCALE_NS, { zh, en })
+      ? registerLocaleTolerant(locale)
       : undefined
     return () => {
       if (typeof undoDicts === 'function') undoDicts()
@@ -135,8 +202,14 @@ export function apply(ctx: UltraSlashClientContext): void {
 
   ctx.effect(() => injectDividerStyle(), `${PLUGIN_NAME}: slash divider`)
 
+  // The bridge must only run when this half owns the slash source: a double
+  // bridge would start two sessions for one /new (both halves wrapping the
+  // same command source).
+  let ownSource = false
+
   ctx.effect(() => {
     const t = bindMenuTranslate(locale)
+    const readNewDefault = (): string => cache.defaults().new ?? ''
     const source = {
       trigger: '/' as const,
       name: PLUGIN_SLASH_SOURCE,
@@ -158,10 +231,19 @@ export function apply(ctx: UltraSlashClientContext): void {
         if (commandName === '') return undefined
         return { text: `/${commandName} ` }
       },
+      matchSpace: newSlashMatchSpace((name) => ctx.get(name), t, readNewDefault),
+      matchEnter: newSlashMatchEnter((name) => ctx.get(name), t, readNewDefault),
+      // The text-ref lexicon: the plugin's command names highlight in the
+      // composer textarea in every session state (the roll is derived from
+      // the persisted catalog, never from the session's running state).
+      lexicon: () => pluginLexicon(cache.list().map((command) => command.name)),
+      subscribeLexicon: (_session: unknown, listener: () => void) => cache.subscribe(listener),
     }
-    const unregister = inputTriggers.registerSource(source)
+    const outcome = registerSourceTolerant(inputTriggers, source)
+    ownSource = outcome.owned
     return () => {
-      unregister()
+      outcome.dispose()
+      ownSource = false
     }
   }, `${PLUGIN_NAME}: ultra-slash source`)
 
@@ -171,9 +253,13 @@ export function apply(ctx: UltraSlashClientContext): void {
   )
 
   ctx.effect(
-    () => installNewSessionBridge(inputTriggers, () => {
-      startNewSession((name) => ctx.get(name))
-    }),
+    () => {
+      if (!ownSource) return () => {}
+      return installNewSessionBridge(inputTriggers, (initialText) => {
+        const text = initialText.trim().length > 0 ? initialText : cache.defaults().new ?? ''
+        startNewSession((name) => ctx.get(name), text)
+      })
+    },
     `${PLUGIN_NAME}: /new session`,
   )
 
@@ -181,17 +267,31 @@ export function apply(ctx: UltraSlashClientContext): void {
   if (slots !== undefined) {
     ctx.effect(() => {
       const t = bindMenuTranslate(locale)
-      slots.inject('settings.section', () => slots.register({
-        name: 'settings.section',
-        id: 'ultra-slash',
-        order: 28,
-        label: () => t('settings.nav'),
-        locale: LOCALE_NS,
-      }, () => h(SettingsSection, {
-        t,
-        locale: locale?.getSnapshot?.()?.active === 'en' ? 'en' : 'zh',
-        cache,
-      })))
+      slots.inject('settings.section', () => {
+        try {
+          return slots.register({
+            name: 'settings.section',
+            id: 'ultra-slash',
+            order: 28,
+            label: () => t('settings.nav'),
+            locale: LOCALE_NS,
+          }, () => h(SettingsSection, {
+            t,
+            locale: locale?.getSnapshot?.()?.active === 'en' ? 'en' : 'zh',
+            cache,
+          }))
+        } catch (error: unknown) {
+          const message = error instanceof Error ? error.message : String(error)
+          if (!/already has a registration|already has an entry/.test(message)) throw error
+          // A leftover ultra-slash install owns the settings section; stand
+          // down for it so the settings page keeps rendering.
+          console.warn(
+            '[deepseek-harness-ultra-slash] settings section \"ultra-slash\" is already registered '
+            + '(a leftover ultra-slash install); this plugin stands down for it.',
+          )
+          return () => {}
+        }
+      })
       return () => {}
     }, `${PLUGIN_NAME}: settings`)
   }

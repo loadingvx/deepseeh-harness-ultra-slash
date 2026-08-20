@@ -25,10 +25,10 @@ Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) wit
 ### From npm
 
 ```sh
-dsh plugin --profile web add deepseek-harness-ultra-slash@0.2.0
+dsh plugin --profile web add deepseek-harness-ultra-slash@0.2.1
 ```
 
-Do not omit `@0.2.0`: pnpm protects freshly published versions for 24 hours, and a bare install may pick an older release.
+Do not omit `@0.2.1`: pnpm protects freshly published versions for 24 hours, and a bare install may pick an older release.
 
 ### From GitHub
 

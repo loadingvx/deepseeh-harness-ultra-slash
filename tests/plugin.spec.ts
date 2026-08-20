@@ -5,6 +5,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, vi } from 'vitest'
 import * as plugin from '../src/index.ts'
 import { apply, executeSteer } from '../src/index.ts'
+import { withConflictSink, type YieldedConflict } from '../src/register.ts'
 import type { SteerAgent, SteerCommandDefinition, SteerInvocation } from '../src/types.ts'
 
 function agent(status: SteerAgent['status'], steer: SteerAgent['steer'] = vi.fn()): SteerAgent {
@@ -141,6 +142,52 @@ describe('apply()', () => {
 
     while (disposers.length > 0) disposers.pop()?.()
     expect(registered).toHaveLength(0)
+    vi.unstubAllEnvs()
+  })
+  it('stands down for the /ultra-slash HTTP prefix when the webServer already owns it', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'ultra-slash-http-yield-'))
+    vi.stubEnv('DSH_HOME', home)
+    const registered: SteerCommandDefinition[] = []
+    const ctx = {
+      get() { return undefined },
+      commands: {
+        register(definition: SteerCommandDefinition) {
+          registered.push(definition)
+          return () => {}
+        },
+      },
+      effect() { return () => {} },
+      inject: (_deps: string[], callback: (host: {
+        effect(fn: () => unknown): () => void
+        get(name: string): unknown
+      }) => void) => {
+        // The workbench already registered the same prefix; webServer throws
+        // like the real implementation on the second registration.
+        const host = {
+          effect: (fn: () => unknown) => {
+            fn()
+            return () => {}
+          },
+          get(name: string) {
+            if (name !== 'webServer') return undefined
+            return {
+              register() {
+                throw new Error('webserver: duplicate prefix route \"/ultra-slash\"')
+              },
+            }
+          },
+        }
+        callback(host)
+      },
+    } as unknown as Context
+    const conflicts: YieldedConflict[] = []
+    const restore = withConflictSink((conflict) => conflicts.push(conflict))
+    try {
+      expect(() => apply(ctx)).not.toThrow()
+    } finally {
+      restore()
+    }
+    expect(conflicts.some((c) => c.resource === 'http-prefix' && c.path === '/ultra-slash')).toBe(true)
     vi.unstubAllEnvs()
   })
 })

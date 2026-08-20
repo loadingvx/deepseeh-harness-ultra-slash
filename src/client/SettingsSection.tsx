@@ -1,9 +1,13 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import {
   BUILTIN_SLASH_COMMANDS,
+  CONFIGURABLE_DEFAULT_NAMES,
   MAX_CUSTOM_COMMANDS,
   normalizeCommandName,
   validateCustomCommand,
+  type BuiltinDefaults,
+  type BuiltinSlashCommand,
+  type ConfigurableDefaultName,
   type CustomSlashCommand,
 } from '../catalog.ts'
 import { formatCatalogIssue, type UiLocale } from '../locales.ts'
@@ -30,6 +34,34 @@ function slash(name: string): string {
   return `/${name}`
 }
 
+function kindTagKey(kind: BuiltinSlashCommand['kind']): string {
+  return kind === 'steer'
+    ? 'settings.rowKindSteer'
+    : kind === 'session'
+      ? 'settings.rowKindSession'
+      : 'settings.rowKindAlias'
+}
+
+function configurableName(name: string): ConfigurableDefaultName | null {
+  return (CONFIGURABLE_DEFAULT_NAMES as readonly string[]).includes(name)
+    ? name as ConfigurableDefaultName
+    : null
+}
+
+function defaultLabelKey(name: ConfigurableDefaultName): string {
+  return name === 'new' ? 'defaults.labelNew' : name === 'skill' ? 'defaults.labelSkill' : 'defaults.labelDocs'
+}
+
+/** Shipped default prompt text per configurable builtin (localized). */
+export function builtinPayloadDefaults(t: Translate): BuiltinDefaults {
+  const out: BuiltinDefaults = {}
+  for (const name of CONFIGURABLE_DEFAULT_NAMES) {
+    const command = BUILTIN_SLASH_COMMANDS.find(c => c.name === name)
+    if (command?.payloadKey !== undefined) out[name] = t(command.payloadKey)
+  }
+  return out
+}
+
 function takenNames(commands: readonly CustomSlashCommand[], except?: string): Set<string> {
   const names = new Set<string>()
   for (const command of commands) {
@@ -53,8 +85,11 @@ export function SettingsSection({ t, locale, cache }: SettingsSectionProps) {
   useEffect(() => {
     return cache.subscribe(() => {
       setCommands(cache.list())
+      // Keep the shipped payload visible: cached (persisted) values override,
+      // anything unset falls back to the built-in default text.
+      setDefaultsDraft({ ...builtinPayloadDefaults(t), ...cache.defaults() })
     })
-  }, [cache])
+  }, [cache, t])
 
   useEffect(() => {
     let live = true
@@ -84,7 +119,7 @@ export function SettingsSection({ t, locale, cache }: SettingsSectionProps) {
   const saveList = async (next: CustomSlashCommand[], okText: string): Promise<boolean> => {
     setBusy(true)
     setNotice(null)
-    const result = await cache.save(next)
+    const result = await cache.save(next, cache.defaults())
     setBusy(false)
     if (!result.ok) {
       setNotice({ kind: 'error', text: result.message })
@@ -94,6 +129,29 @@ export function SettingsSection({ t, locale, cache }: SettingsSectionProps) {
     setConfirmDelete(null)
     setWarning('')
     return true
+  }
+
+  // ---- builtin default prompts (persisted with the custom list) ----
+  // Prefilled with the shipped default text so the user sees exactly what will
+  // be injected; their own persisted values override when present.
+  const [defaultsDraft, setDefaultsDraft] = useState<BuiltinDefaults>(() => ({
+    ...builtinPayloadDefaults(t),
+    ...cache.defaults(),
+  }))
+  const [defaultsBusy, setDefaultsBusy] = useState(false)
+  const [defaultsNotice, setDefaultsNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
+
+  const onSaveDefaults = async (): Promise<void> => {
+    if (defaultsBusy) return
+    setDefaultsBusy(true)
+    setDefaultsNotice(null)
+    const result = await cache.save(cache.list(), defaultsDraft)
+    setDefaultsBusy(false)
+    if (!result.ok) {
+      setDefaultsNotice({ kind: 'error', text: result.message })
+      return
+    }
+    setDefaultsNotice({ kind: 'ok', text: t('defaults.saved') })
   }
 
   const onAdd = async (): Promise<void> => {
@@ -132,28 +190,63 @@ export function SettingsSection({ t, locale, cache }: SettingsSectionProps) {
       <h2 className={css.heading}>{t('settings.title')}</h2>
       <p className={css.intro}>{t('settings.intro')}</p>
 
+      {/* 内置命令的默认内容：每个基本命令一行，标签 + 说明 + guidance 设置（只保留设置区）。 */}
       <section className={css.block}>
         <h3 className={css.blockTitle}>{t('settings.builtinTitle')}</h3>
-        <p className={css.blockHint}>{t('settings.builtinHint')}</p>
-        <ul className={css.list}>
-          {BUILTIN_SLASH_COMMANDS.map((command) => (
-            <li key={command.name} className={css.card}>
-              <div className={css.cardHead}>
-                <div className={css.grow}>
-                  <div className={css.slash}>{slash(command.name)}</div>
-                  <p className={css.desc}>{t(command.descriptionKey)}</p>
+        <p className={css.blockHint}>{t('defaults.hint')}</p>
+        <div className={css.defaultsList}>
+          {BUILTIN_SLASH_COMMANDS.map((command) => {
+            const defaultName = configurableName(command.name)
+            return (
+              <div key={command.name} className={css.defaultsRow}>
+                <div className={css.defaultsHead}>
+                  <span className={css.slash}>{slash(command.name)}</span>
+                  <span className={css.kind}>{t(kindTagKey(command.kind))}</span>
                 </div>
-                <span className={css.kind}>
-                  {t(command.kind === 'steer'
-                    ? 'settings.rowKindSteer'
-                    : command.kind === 'session'
-                      ? 'settings.rowKindSession'
-                      : 'settings.rowKindAlias')}
-                </span>
+                <p className={css.desc}>{t(command.descriptionKey)}</p>
+                {defaultName !== null ? (
+                  <>
+                    <label className={css.defaultsLabel} htmlFor={'default-' + defaultName}>
+                      {t(defaultLabelKey(defaultName))}
+                    </label>
+                    <textarea
+                      id={'default-' + defaultName}
+                      className={css.defaultsTextarea}
+                      value={defaultsDraft[defaultName] ?? ''}
+                      disabled={defaultsBusy}
+                      placeholder={defaultName === 'new' ? t('defaults.placeholderNew') : t('defaults.placeholder')}
+                      onChange={(event) => {
+                        const next = { ...defaultsDraft }
+                        const text = event.target.value
+                        if (text.trim().length === 0) delete next[defaultName]
+                        else next[defaultName] = text
+                        setDefaultsDraft(next)
+                      }}
+                    />
+                    {(defaultsDraft[defaultName] ?? '') === '' ? (
+                      <p className={css.hint}>{t('defaults.fallback')}</p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className={css.hint}>{t('defaults.steerManual')}</p>
+                )}
               </div>
-            </li>
-          ))}
-        </ul>
+            )
+          })}
+        </div>
+        <div className={css.actions}>
+          <button
+            type="button"
+            className={css.btn + ' ' + css.primary}
+            disabled={defaultsBusy}
+            onClick={() => { void onSaveDefaults() }}
+          >
+            {defaultsBusy ? t('defaults.saving') : t('defaults.save')}
+          </button>
+          {defaultsNotice !== null ? (
+            <p className={defaultsNotice.kind === 'ok' ? css.ok : css.error} role="status">{defaultsNotice.text}</p>
+          ) : null}
+        </div>
       </section>
 
       <section className={css.block}>
